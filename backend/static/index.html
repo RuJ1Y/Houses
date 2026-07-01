@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>重庆二手房源数据可视化</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">重庆二手房源</p>
+        <h1>价格数据分析与可视化</h1>
+      </div>
+      <div class="header-meta">
+        <span id="latestCrawlTime">--</span>
+        <span id="datasetSize">--</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="metric-grid" id="metricGrid"></section>
+
+      <section class="dashboard-grid">
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>区县均价排行</h2>
+            <span>元/㎡</span>
+          </div>
+          <div id="districtPriceChart" class="chart chart-tall"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>总价区间分布</h2>
+            <span>套</span>
+          </div>
+          <div id="priceDistributionChart" class="chart"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>面积区间分布</h2>
+            <span>套</span>
+          </div>
+          <div id="areaDistributionChart" class="chart"></div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>面积与单价关系</h2>
+            <span>抽样点</span>
+          </div>
+          <canvas id="scatterChart" class="scatter-canvas" width="1040" height="430"></canvas>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>户型结构</h2>
+            <span>室</span>
+          </div>
+          <div id="roomChart" class="chart"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>分析结论</h2>
+            <span>自动生成</span>
+          </div>
+          <ul id="conclusions" class="conclusion-list"></ul>
+        </article>
+      </section>
+
+      <section class="section-heading">
+        <div>
+          <p class="eyebrow">信息管理分析</p>
+          <h2>数据质量、市场结构与决策洞察</h2>
+        </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>区域性价比分析</h2>
+            <span>均价 × 供给</span>
+          </div>
+          <div id="valueDistricts" class="value-panel"></div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>市场客群分层</h2>
+            <span>按价格与面积划分</span>
+          </div>
+          <div id="marketSegments" class="segment-grid"></div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>区县市场象限</h2>
+            <span>均价 × 供给</span>
+          </div>
+          <div id="districtQuadrants" class="insight-table"></div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>热门小区样本</h2>
+            <span>套数排行</span>
+          </div>
+          <div id="topCommunities" class="insight-table"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>房源标签特征</h2>
+            <span>出现次数</span>
+          </div>
+          <div id="tagChart" class="chart"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <h2>朝向结构</h2>
+            <span>套</span>
+          </div>
+          <div id="orientationChart" class="chart"></div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>相关性分析</h2>
+            <span>Pearson</span>
+          </div>
+          <div id="correlationPanel" class="correlation-grid"></div>
+        </article>
+      </section>
+
+      <section class="panel listing-panel">
+        <div class="panel-title listing-title">
+          <div>
+            <h2>房源列表</h2>
+            <span id="listingTotal">--</span>
+          </div>
+          <div class="filters">
+            <select id="districtFilter" aria-label="区县"></select>
+            <input id="keywordFilter" type="search" placeholder="小区 / 标题" />
+            <input id="minPriceFilter" type="number" min="0" placeholder="最低总价" />
+            <input id="maxPriceFilter" type="number" min="0" placeholder="最高总价" />
+            <select id="sortFilter" aria-label="排序">
+              <option value="unit_desc">单价从高到低</option>
+              <option value="unit_asc">单价从低到高</option>
+              <option value="total_desc">总价从高到低</option>
+              <option value="total_asc">总价从低到高</option>
+              <option value="area_desc">面积从大到小</option>
+              <option value="area_asc">面积从小到大</option>
+            </select>
+            <button id="searchButton" type="button">筛选</button>
+          </div>
+        </div>
+        <div id="listingGrid" class="listing-grid"></div>
+        <div class="pager">
+          <button id="prevPage" type="button">上一页</button>
+          <span id="pageInfo">--</span>
+          <button id="nextPage" type="button">下一页</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
