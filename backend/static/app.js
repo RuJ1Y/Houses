@@ -4,6 +4,8 @@ const state = {
   currentTotal: 0,
   listings: [],
   marketMedianUnitPrice: null,
+  scatterRows: [],
+  boxplotRows: [],
 };
 
 const formatNumber = (value, digits = 0) => {
@@ -14,8 +16,10 @@ const formatNumber = (value, digits = 0) => {
   });
 };
 
+const apiBase = window.location.protocol === "file:" ? "http://127.0.0.1:8765" : "";
+
 const getJson = async (url) => {
-  const response = await fetch(url);
+  const response = await fetch(`${apiBase}${url}`);
   if (!response.ok) throw new Error(`${url} ${response.status}`);
   return response.json();
 };
@@ -28,7 +32,7 @@ const escapeHtml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 
-const imageProxyUrl = (url) => (url ? `/api/image?url=${encodeURIComponent(url)}` : "");
+const imageProxyUrl = (url) => (url ? `${apiBase}/api/image?url=${encodeURIComponent(url)}` : "");
 
 const listingImageUrl = (url) => {
   if (!url) return "";
@@ -269,6 +273,149 @@ function renderCorrelations(rows) {
       `;
     })
     .join("");
+}
+
+function renderDistrictRoomHeatmap(data) {
+  const container = document.querySelector("#districtRoomHeatmap");
+  const districts = data.districts || [];
+  const roomLabels = data.roomLabels || [];
+  const cells = data.cells || [];
+  if (!districts.length || !roomLabels.length || !cells.length) {
+    container.innerHTML = `<div class="empty-state">暂无户型热力数据</div>`;
+    return;
+  }
+
+  const maxCount = Math.max(...cells.map((cell) => Number(cell.count) || 0), 1);
+  const byKey = new Map(cells.map((cell) => [`${cell.district}-${cell.roomLabel}`, cell]));
+  const columnStyle = `grid-template-columns: 86px repeat(${roomLabels.length}, minmax(68px, 1fr))`;
+
+  container.innerHTML = `
+    <div class="heatmap-grid" style="${columnStyle}">
+      <div class="heatmap-corner">区县</div>
+      ${roomLabels.map((label) => `<div class="heatmap-head">${escapeHtml(label)}</div>`).join("")}
+      ${districts
+        .map((district) => {
+          const rowCells = roomLabels
+            .map((label) => {
+              const cell = byKey.get(`${district}-${label}`) || {};
+              const count = Number(cell.count) || 0;
+              const alpha = count ? 0.12 + (count / maxCount) * 0.78 : 0.04;
+              return `
+                <div class="heatmap-cell" style="background:rgba(15, 123, 108, ${alpha})" title="${escapeHtml(district)} ${escapeHtml(label)}">
+                  <strong>${formatNumber(count)}</strong>
+                  <span>${cell.avgUnitPrice ? `${formatNumber(cell.avgUnitPrice)}元/㎡` : "--"}</span>
+                </div>
+              `;
+            })
+            .join("");
+          return `<div class="heatmap-district">${escapeHtml(district)}</div>${rowCells}`;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderUnitPriceBoxplot(rows) {
+  const canvas = document.querySelector("#unitPriceBoxplotChart");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(320, Math.floor(rect.width * dpr));
+  canvas.height = Math.max(300, Math.floor(rect.height * dpr));
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const width = rect.width;
+  const height = rect.height;
+  const padding = { left: 76, right: 24, top: 22, bottom: 42 };
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fillRect(0, 0, width, height);
+
+  const clean = rows.filter(
+    (row) => row.p10 !== null && row.q1 !== null && row.median !== null && row.q3 !== null && row.p90 !== null,
+  );
+  if (!clean.length) {
+    ctx.fillStyle = "#667085";
+    ctx.font = "14px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("暂无箱线图数据", width / 2, height / 2);
+    return;
+  }
+
+  const minValue = Math.min(...clean.map((row) => row.p10));
+  const maxValue = Math.max(...clean.map((row) => row.p90));
+  const floor = Math.max(0, Math.floor(minValue / 1000) * 1000);
+  const ceiling = Math.ceil(maxValue / 1000) * 1000;
+  const range = Math.max(1, ceiling - floor);
+  const rowGap = plotH / clean.length;
+  const boxHeight = Math.min(18, Math.max(10, rowGap * 0.48));
+  const xOf = (value) => padding.left + ((value - floor) / range) * plotW;
+
+  ctx.strokeStyle = "#d9e1ec";
+  ctx.lineWidth = 1;
+  ctx.fillStyle = "#667085";
+  ctx.font = "12px Arial";
+  ctx.textAlign = "center";
+  const tickCount = 4;
+  for (let index = 0; index <= tickCount; index += 1) {
+    const value = floor + (range / tickCount) * index;
+    const x = xOf(value);
+    ctx.beginPath();
+    ctx.moveTo(x, padding.top);
+    ctx.lineTo(x, padding.top + plotH);
+    ctx.stroke();
+    ctx.fillText(`${formatNumber(value / 10000, 1)}万`, x, height - 16);
+  }
+
+  clean.forEach((row, index) => {
+    const y = padding.top + rowGap * index + rowGap / 2;
+    const p10 = xOf(row.p10);
+    const q1 = xOf(row.q1);
+    const med = xOf(row.median);
+    const q3 = xOf(row.q3);
+    const p90 = xOf(row.p90);
+
+    ctx.strokeStyle = "#365b9f";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(p10, y);
+    ctx.lineTo(p90, y);
+    ctx.moveTo(p10, y - boxHeight * 0.45);
+    ctx.lineTo(p10, y + boxHeight * 0.45);
+    ctx.moveTo(p90, y - boxHeight * 0.45);
+    ctx.lineTo(p90, y + boxHeight * 0.45);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(15, 123, 108, 0.2)";
+    ctx.strokeStyle = "#0f7b6c";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(q1, y - boxHeight / 2, Math.max(2, q3 - q1), boxHeight, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = "#d36b38";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(med, y - boxHeight * 0.62);
+    ctx.lineTo(med, y + boxHeight * 0.62);
+    ctx.stroke();
+
+    ctx.fillStyle = "#172033";
+    ctx.font = "12px Arial, Microsoft YaHei";
+    ctx.textAlign = "right";
+    ctx.fillText(row.district, padding.left - 10, y + 4);
+    ctx.fillStyle = "#667085";
+    ctx.textAlign = "left";
+    ctx.fillText(`${formatNumber(row.median)}元/㎡`, Math.min(width - 78, p90 + 8), y + 4);
+  });
+
+  ctx.fillStyle = "#667085";
+  ctx.font = "12px Arial, Microsoft YaHei";
+  ctx.textAlign = "center";
+  ctx.fillText("单价区间（p10 / q1 / 中位数 / q3 / p90）", padding.left + plotW / 2, height - 2);
 }
 
 function sourceLabel(source) {
@@ -592,6 +739,8 @@ async function initDashboard() {
     tags,
     orientations,
     correlations,
+    districtRoomHeatmap,
+    unitPriceBoxplot,
   ] =
     await Promise.all([
       getJson("/api/summary"),
@@ -608,8 +757,12 @@ async function initDashboard() {
       getJson("/api/stats/tags"),
       getJson("/api/stats/orientations"),
       getJson("/api/analysis/correlations"),
+      getJson("/api/stats/district-room-heatmap"),
+      getJson("/api/stats/district-unit-price-boxplot"),
     ]);
 
+  state.scatterRows = scatter;
+  state.boxplotRows = unitPriceBoxplot;
   renderMetrics(summary);
   renderBarList(
     "#districtPriceChart",
@@ -670,6 +823,8 @@ async function initDashboard() {
     color: "linear-gradient(90deg, #1677a3, #72bdd9)",
   });
   renderCorrelations(correlations);
+  renderDistrictRoomHeatmap(districtRoomHeatmap);
+  renderUnitPriceBoxplot(unitPriceBoxplot);
 }
 
 async function main() {
@@ -677,9 +832,9 @@ async function main() {
   await initDashboard();
   initListingDetailLayer();
   await loadListings();
-  window.addEventListener("resize", async () => {
-    const scatter = await getJson("/api/stats/scatter?limit=1400");
-    renderScatter(scatter);
+  window.addEventListener("resize", () => {
+    renderScatter(state.scatterRows);
+    renderUnitPriceBoxplot(state.boxplotRows);
   });
 }
 

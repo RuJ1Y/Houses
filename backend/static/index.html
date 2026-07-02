@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>重庆二手房源数据可视化</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="app-header">
@@ -105,6 +105,22 @@
 
         <article class="panel panel-wide">
           <div class="panel-title">
+            <h2>区县户型热力图</h2>
+            <span>区县 × 室数</span>
+          </div>
+          <div id="districtRoomHeatmap" class="heatmap"></div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>区县单价箱线图</h2>
+            <span>分位数</span>
+          </div>
+          <canvas id="unitPriceBoxplotChart" class="boxplot-canvas" width="1040" height="430"></canvas>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-title">
             <h2>热门小区样本</h2>
             <span>套数排行</span>
           </div>
@@ -177,6 +193,6 @@
       ></aside>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script src="app.js"></script>
   </body>
 </html>

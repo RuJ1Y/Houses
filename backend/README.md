@@ -27,13 +27,13 @@ python backend/server.py
 浏览器打开：
 
 ```text
-http://127.0.0.1:8000
+http://127.0.0.1:8765
 ```
 
 健康检查：
 
 ```text
-http://127.0.0.1:8000/health
+http://127.0.0.1:8765/health
 ```
 
 ## 主要接口

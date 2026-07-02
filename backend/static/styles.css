@@ -210,6 +210,14 @@ main {
   background: var(--panel-soft);
 }
 
+.boxplot-canvas {
+  display: block;
+  width: 100%;
+  height: 380px;
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
 .empty-state {
   padding: 18px;
   color: var(--muted);
@@ -390,6 +398,76 @@ main {
 .correlation-grid {
   display: grid;
   gap: 12px;
+}
+
+.heatmap {
+  overflow-x: auto;
+}
+
+.heatmap-grid {
+  display: grid;
+  min-width: 520px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.heatmap-corner,
+.heatmap-head,
+.heatmap-district,
+.heatmap-cell {
+  min-width: 0;
+  border-right: 1px solid rgba(217, 225, 236, 0.86);
+  border-bottom: 1px solid rgba(217, 225, 236, 0.86);
+}
+
+.heatmap-corner,
+.heatmap-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  background: #eef4f8;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.heatmap-district {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 8px 10px;
+  overflow: hidden;
+  background: #fff;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heatmap-cell {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-height: 46px;
+  padding: 6px;
+  text-align: center;
+}
+
+.heatmap-cell strong {
+  color: #172033;
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.heatmap-cell span {
+  overflow: hidden;
+  color: rgba(23, 32, 51, 0.72);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .correlation-name {

@@ -106,6 +106,21 @@ def median(values: list[float | int]) -> float | None:
     return statistics.median(clean)
 
 
+def percentile(values: list[float | int], ratio: float) -> float | None:
+    clean = sorted(value for value in values if value is not None)
+    if not clean:
+        return None
+    if len(clean) == 1:
+        return clean[0]
+    position = (len(clean) - 1) * ratio
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return clean[lower]
+    weight = position - lower
+    return clean[lower] * (1 - weight) + clean[upper] * weight
+
+
 def round_or_none(value: float | None, digits: int = 1) -> float | None:
     return None if value is None else round(value, digits)
 
@@ -244,6 +259,31 @@ def api_district_room_heatmap() -> dict:
                 }
             )
     return {"districts": districts, "roomLabels": room_labels, "cells": cells}
+
+
+def api_district_unit_price_boxplot() -> list[dict]:
+    groups: dict[str, list[int]] = defaultdict(list)
+    for item in VALID_LISTINGS:
+        if item["district"] and item["unitPriceYuanM2"] is not None:
+            groups[item["district"]].append(item["unitPriceYuanM2"])
+
+    rows = []
+    for district, values in groups.items():
+        if len(values) < 50:
+            continue
+        rows.append(
+            {
+                "district": district,
+                "count": len(values),
+                "p10": round_or_none(percentile(values, 0.1)),
+                "q1": round_or_none(percentile(values, 0.25)),
+                "median": round_or_none(percentile(values, 0.5)),
+                "q3": round_or_none(percentile(values, 0.75)),
+                "p90": round_or_none(percentile(values, 0.9)),
+                "avgUnitPrice": round_or_none(avg(values)),
+            }
+        )
+    return sorted(rows, key=lambda row: row["median"] or 0, reverse=True)[:14]
 
 
 def api_orientation_distribution() -> list[dict]:
@@ -694,6 +734,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         try:
             if route == "/":
                 self.send_static("/")
+            elif route in {"/app.js", "/styles.css"}:
+                self.send_static(f"/static{route}")
             elif route.startswith("/static/"):
                 self.send_static(route)
             elif route == "/health":
@@ -712,6 +754,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.send_json(api_room_layout())
             elif route == "/api/stats/district-room-heatmap":
                 self.send_json(api_district_room_heatmap())
+            elif route == "/api/stats/district-unit-price-boxplot":
+                self.send_json(api_district_unit_price_boxplot())
             elif route == "/api/stats/orientations":
                 self.send_json(api_orientation_distribution())
             elif route == "/api/stats/tags":
@@ -751,7 +795,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 def run() -> None:
     host = "127.0.0.1"
-    port = to_int(os.environ.get("PORT")) or 8000
+    port = to_int(os.environ.get("PORT")) or 8765
     if not DATA_FILE.exists():
         print(f"Data file not found: {DATA_FILE}")
     print(f"Loaded {len(LISTINGS)} rows from {DATA_FILE}")
