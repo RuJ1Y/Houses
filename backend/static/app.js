@@ -2,6 +2,8 @@ const state = {
   page: 1,
   pageSize: 12,
   currentTotal: 0,
+  listings: [],
+  marketMedianUnitPrice: null,
 };
 
 const formatNumber = (value, digits = 0) => {
@@ -28,6 +30,16 @@ const escapeHtml = (value) =>
 
 const imageProxyUrl = (url) => (url ? `/api/image?url=${encodeURIComponent(url)}` : "");
 
+const listingImageUrl = (url) => {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.includes("daojiale.com") ? url : imageProxyUrl(url);
+  } catch {
+    return imageProxyUrl(url);
+  }
+};
+
 const placeholderImage = (item) => {
   const district = item?.district || "重庆";
   const community = item?.community || "二手房源";
@@ -52,6 +64,7 @@ const placeholderImage = (item) => {
 };
 
 function renderMetrics(summary) {
+  state.marketMedianUnitPrice = summary.medianUnitPrice;
   const metrics = [
     ["有效房源", `${formatNumber(summary.validCount)} 套`, `原始 ${formatNumber(summary.rawCount)} 条`],
     ["平均单价", `${formatNumber(summary.avgUnitPrice)} 元/㎡`, `中位数 ${formatNumber(summary.medianUnitPrice)} 元/㎡`],
@@ -166,51 +179,6 @@ function renderScatter(rows) {
   ctx.globalAlpha = 1;
 }
 
-function renderDistrictRoomHeatmap(data) {
-  const container = document.querySelector("#districtRoomHeatmap");
-  const districts = data?.districts || [];
-  const roomLabels = data?.roomLabels || [];
-  const cells = data?.cells || [];
-  if (!districts.length || !roomLabels.length) {
-    container.innerHTML = `<div class="empty-state">暂无热力图数据</div>`;
-    return;
-  }
-
-  const cellMap = new Map(cells.map((cell) => [`${cell.district}__${cell.roomLabel}`, cell]));
-  const maxPrice = Math.max(...cells.map((cell) => Number(cell.avgUnitPrice) || 0), 1);
-  const minPrice = Math.min(...cells.filter((cell) => cell.avgUnitPrice).map((cell) => Number(cell.avgUnitPrice)), maxPrice);
-  const priceRange = Math.max(maxPrice - minPrice, 1);
-
-  const colorFor = (value) => {
-    if (!value) return "rgba(237, 241, 247, 0.88)";
-    const ratio = Math.max(0.08, Math.min(1, (Number(value) - minPrice) / priceRange));
-    return `rgba(15, 123, 108, ${0.18 + ratio * 0.72})`;
-  };
-
-  container.style.setProperty("--heatmap-cols", roomLabels.length + 1);
-  container.innerHTML = `
-    <div class="heatmap-head heatmap-corner">区县</div>
-    ${roomLabels.map((label) => `<div class="heatmap-head">${escapeHtml(label)}</div>`).join("")}
-    ${districts
-      .map((district) => {
-        const rowCells = roomLabels
-          .map((label) => {
-            const cell = cellMap.get(`${district}__${label}`) || {};
-            const price = cell.avgUnitPrice;
-            return `
-              <div class="heatmap-cell" style="background:${colorFor(price)}" title="${escapeHtml(district)} ${escapeHtml(label)}：${formatNumber(price)}元/㎡，${formatNumber(cell.count || 0)}套">
-                <strong>${formatNumber(price)}</strong>
-                <span>${formatNumber(cell.count || 0)}套</span>
-              </div>
-            `;
-          })
-          .join("");
-        return `<div class="heatmap-label">${escapeHtml(district)}</div>${rowCells}`;
-      })
-      .join("")}
-  `;
-}
-
 function renderConclusions(items) {
   document.querySelector("#conclusions").innerHTML = items
     .map((item) => `<li>${escapeHtml(item)}</li>`)
@@ -303,6 +271,225 @@ function renderCorrelations(rows) {
     .join("");
 }
 
+function sourceLabel(source) {
+  const text = String(source || "").toLowerCase();
+  if (text.includes("daojiale")) return "到家了";
+  if (text.includes("fang")) return "房天下";
+  return source || "未标注";
+}
+
+function classifyListing(item) {
+  const totalPrice = Number(item.totalPriceWan) || 0;
+  const area = Number(item.areaM2) || 0;
+  const unitPrice = Number(item.unitPriceYuanM2) || 0;
+  if (totalPrice >= 500 || area >= 200) return "高端大宅";
+  if (unitPrice >= 20000) return "核心高价";
+  if (area >= 110 && totalPrice >= 100) return "改善居住";
+  if (totalPrice < 100 || area < 90) return "刚需紧凑";
+  return "主流均衡";
+}
+
+function unitPriceLevel(item) {
+  const unitPrice = Number(item.unitPriceYuanM2);
+  const median = Number(state.marketMedianUnitPrice);
+  if (!unitPrice || !median) return "市场对比 --";
+  const delta = (unitPrice - median) / median;
+  if (delta >= 0.25) return "高于市场中位";
+  if (delta <= -0.15) return "低于市场中位";
+  return "接近市场中位";
+}
+
+function formatDateTime(value) {
+  if (!value) return "--";
+  return String(value).replace("T", " ").slice(0, 19);
+}
+
+function renderDetailMetric(label, value, note = "") {
+  return `
+    <div class="detail-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderDetailRow(label, value) {
+  return `
+    <div class="detail-row">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || "--")}</strong>
+    </div>
+  `;
+}
+
+function closeListingDetail() {
+  const layer = document.querySelector("#listingDetailLayer");
+  if (!layer) return;
+  layer.hidden = true;
+  document.body.classList.remove("detail-open");
+  document.querySelectorAll(".listing-card.is-selected").forEach((card) => card.classList.remove("is-selected"));
+}
+
+function getListingColumnIndex(card, grid, columnCount) {
+  const cardCenter = card.getBoundingClientRect().left + card.getBoundingClientRect().width / 2;
+  const firstRowCards = [...grid.querySelectorAll(".listing-card")].slice(0, columnCount);
+  if (!firstRowCards.length) return 1;
+  let bestIndex = 1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  firstRowCards.forEach((candidate, index) => {
+    const rect = candidate.getBoundingClientRect();
+    const center = rect.left + rect.width / 2;
+    const distance = Math.abs(center - cardCenter);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index + 1;
+    }
+  });
+  return bestIndex;
+}
+
+function positionListingDetail(card) {
+  const layer = document.querySelector("#listingDetailLayer");
+  const dialog = document.querySelector("#listingDetailDialog");
+  const grid = document.querySelector("#listingGrid");
+  if (!layer || !dialog || !card || !grid) return;
+
+  dialog.style.left = "";
+  dialog.style.right = "";
+  dialog.style.top = "";
+  dialog.style.bottom = "";
+  dialog.style.width = "";
+  dialog.style.maxHeight = "";
+  dialog.classList.remove("detail-left");
+
+  if (window.matchMedia("(max-width: 760px)").matches) return;
+
+  const columnCount = Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(" ").filter(Boolean).length);
+  const columnIndex = getListingColumnIndex(card, grid, columnCount);
+  const openLeft = columnCount >= 3 ? columnIndex === columnCount : columnCount === 2 ? columnIndex === 2 : false;
+  const cardRect = card.getBoundingClientRect();
+  const gap = 14;
+  const padding = 12;
+  const width = Math.min(460, Math.max(390, Math.floor(window.innerWidth * 0.28)));
+  const maxHeight = Math.min(640, window.innerHeight - padding * 2);
+
+  let left = openLeft ? cardRect.left - width - gap : cardRect.right + gap;
+  left = Math.max(padding, Math.min(window.innerWidth - width - padding, left));
+  let top = cardRect.top;
+  top = Math.max(padding, Math.min(window.innerHeight - maxHeight - padding, top));
+
+  dialog.style.width = `${width}px`;
+  dialog.style.left = `${left}px`;
+  dialog.style.top = `${top}px`;
+  dialog.style.maxHeight = `${maxHeight}px`;
+  dialog.classList.toggle("detail-left", openLeft);
+}
+
+function openListingDetail(item, card) {
+  const layer = document.querySelector("#listingDetailLayer");
+  const dialog = document.querySelector("#listingDetailDialog");
+  if (!item || !layer || !dialog || !card) return;
+
+  const imageSrc = listingImageUrl(item.coverImageUrl) || placeholderImage(item);
+  const fallback = placeholderImage(item);
+  const tags = (item.tags || []).slice(0, 8).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
+  const roomHall = item.roomCount || item.hallCount ? `${formatNumber(item.roomCount)}室 ${formatNumber(item.hallCount)}厅` : "--";
+
+  dialog.innerHTML = `
+    <button class="detail-close" type="button" aria-label="关闭详情">×</button>
+    <img class="detail-hero" src="${escapeHtml(imageSrc)}" data-fallback="${escapeHtml(fallback)}" alt="${escapeHtml(item.community || item.title)}" />
+    <div class="detail-body">
+      <div class="detail-source">
+        <span>${escapeHtml(sourceLabel(item.source))}</span>
+        ${item.isNew ? "<strong>新上</strong>" : ""}
+        ${item.sourceListingId ? `<em>ID ${escapeHtml(item.sourceListingId)}</em>` : ""}
+      </div>
+      <div class="detail-heading">
+        <h3>${escapeHtml(item.title || item.community || "房源详情")}</h3>
+        <span class="detail-badge">${escapeHtml(classifyListing(item))}</span>
+      </div>
+      <div class="detail-metrics">
+        ${renderDetailMetric("总价", `${formatNumber(item.totalPriceWan, 0)}万`, "挂牌总价")}
+        ${renderDetailMetric("单价", `${formatNumber(item.unitPriceYuanM2)}元/㎡`, unitPriceLevel(item))}
+        ${renderDetailMetric("面积", `${formatNumber(item.areaM2, 1)}㎡`, "建筑面积")}
+      </div>
+      <div class="detail-row-grid">
+        ${renderDetailRow("区域", item.district)}
+        ${renderDetailRow("小区", item.community)}
+        ${renderDetailRow("户型", item.layout)}
+        ${renderDetailRow("室厅", roomHall)}
+        ${renderDetailRow("朝向", item.orientation)}
+        ${renderDetailRow("来源", sourceLabel(item.source))}
+        ${renderDetailRow("页码", item.page ? `第 ${formatNumber(item.page)} 页` : "--")}
+        ${renderDetailRow("采集时间", formatDateTime(item.crawlTime))}
+      </div>
+      <div class="detail-tags">${tags || '<span class="tag">暂无标签</span>'}</div>
+    </div>
+  `;
+
+  document.querySelectorAll(".listing-card.is-selected").forEach((selected) => selected.classList.remove("is-selected"));
+  card.classList.add("is-selected");
+  layer.hidden = false;
+  document.body.classList.add("detail-open");
+  positionListingDetail(card);
+
+  dialog.querySelector(".detail-close")?.addEventListener("click", closeListingDetail);
+  const detailImage = dialog.querySelector(".detail-hero");
+  detailImage?.addEventListener(
+    "error",
+    () => {
+      detailImage.src = detailImage.dataset.fallback;
+      detailImage.classList.add("listing-image-fallback");
+    },
+    { once: true },
+  );
+}
+
+function initListingDetailLayer() {
+  const grid = document.querySelector("#listingGrid");
+  const layer = document.querySelector("#listingDetailLayer");
+  if (!grid || !layer) return;
+
+  const openFromCard = (card) => {
+    const index = Number(card.dataset.listingIndex);
+    openListingDetail(state.listings[index], card);
+  };
+
+  grid.addEventListener("click", (event) => {
+    const card = event.target.closest(".listing-card");
+    if (!card) return;
+    openFromCard(card);
+  });
+
+  grid.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const card = event.target.closest(".listing-card");
+    if (!card) return;
+    event.preventDefault();
+    openFromCard(card);
+  });
+
+  layer.addEventListener("click", (event) => {
+    if (event.target === layer) closeListingDetail();
+  });
+
+  document.addEventListener("click", (event) => {
+    const dialog = document.querySelector("#listingDetailDialog");
+    if (layer.hidden || dialog?.contains(event.target) || event.target.closest(".listing-card")) return;
+    closeListingDetail();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeListingDetail();
+  });
+
+  window.addEventListener("resize", () => {
+    const selected = document.querySelector(".listing-card.is-selected");
+    if (!layer.hidden && selected) positionListingDetail(selected);
+  });
+}
+
 function listingQuery() {
   const params = new URLSearchParams();
   const district = document.querySelector("#districtFilter").value;
@@ -323,6 +510,8 @@ function listingQuery() {
 
 async function loadListings() {
   const data = await getJson(`/api/houses?${listingQuery()}`);
+  closeListingDetail();
+  state.listings = data.items || [];
   state.currentTotal = data.total;
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
   document.querySelector("#listingTotal").textContent = `共 ${formatNumber(data.total)} 套`;
@@ -330,13 +519,13 @@ async function loadListings() {
   document.querySelector("#prevPage").disabled = data.page <= 1;
   document.querySelector("#nextPage").disabled = data.page >= totalPages;
 
-  document.querySelector("#listingGrid").innerHTML = data.items
-    .map((item) => {
+  document.querySelector("#listingGrid").innerHTML = state.listings
+    .map((item, index) => {
       const tags = (item.tags || []).slice(0, 3).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
-      const imageSrc = imageProxyUrl(item.coverImageUrl) || placeholderImage(item);
+      const imageSrc = listingImageUrl(item.coverImageUrl) || placeholderImage(item);
       const fallback = placeholderImage(item);
       return `
-        <article class="listing-card">
+        <article class="listing-card" role="button" tabindex="0" data-listing-index="${index}" aria-label="查看房源详情">
           <img class="listing-image" src="${escapeHtml(imageSrc)}" data-fallback="${escapeHtml(fallback)}" alt="${escapeHtml(item.community || item.title)}" loading="lazy" />
           <div>
             <h3 title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h3>
@@ -394,7 +583,6 @@ async function initDashboard() {
     priceDistribution,
     areaDistribution,
     roomLayout,
-    districtRoomHeatmap,
     scatter,
     conclusions,
     valueDistricts,
@@ -411,7 +599,6 @@ async function initDashboard() {
       getJson("/api/stats/price-distribution"),
       getJson("/api/stats/area-distribution"),
       getJson("/api/stats/room-layout"),
-      getJson("/api/stats/district-room-heatmap"),
       getJson("/api/stats/scatter?limit=1400"),
       getJson("/api/analysis/conclusions"),
       getJson("/api/analysis/value-districts"),
@@ -449,7 +636,6 @@ async function initDashboard() {
     { valueKey: "count", color: "linear-gradient(90deg, #8a5a12, #d8a54f)" },
   );
   renderScatter(scatter);
-  renderDistrictRoomHeatmap(districtRoomHeatmap);
   renderConclusions(conclusions);
   renderValueDistricts(valueDistricts);
   renderMarketSegments(marketSegments);
@@ -489,6 +675,7 @@ async function initDashboard() {
 async function main() {
   await initFilters();
   await initDashboard();
+  initListingDetailLayer();
   await loadListings();
   window.addEventListener("resize", async () => {
     const scatter = await getJson("/api/stats/scatter?limit=1400");

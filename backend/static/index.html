@@ -62,14 +62,6 @@
           <div id="roomChart" class="chart"></div>
         </article>
 
-        <article class="panel panel-wide">
-          <div class="panel-title">
-            <h2>区域×户型热力图</h2>
-            <span>平均单价</span>
-          </div>
-          <div id="districtRoomHeatmap" class="heatmap-grid"></div>
-        </article>
-
         <article class="panel">
           <div class="panel-title">
             <h2>分析结论</h2>
@@ -174,6 +166,16 @@
         </div>
       </section>
     </main>
+
+    <div class="detail-layer" id="listingDetailLayer" hidden>
+      <aside
+        class="listing-detail"
+        id="listingDetailDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="房源详情"
+      ></aside>
+    </div>
 
     <script src="/static/app.js"></script>
   </body>
