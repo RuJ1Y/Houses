@@ -8,6 +8,9 @@ const state = {
   boxplotRows: [],
 };
 
+const DETAIL_CLOSE_DURATION = 160;
+let detailCloseTimer = 0;
+
 const formatNumber = (value, digits = 0) => {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
   return Number(value).toLocaleString("zh-CN", {
@@ -472,10 +475,40 @@ function renderDetailRow(label, value) {
 
 function closeListingDetail() {
   const layer = document.querySelector("#listingDetailLayer");
-  if (!layer) return;
-  layer.hidden = true;
+  if (!layer || layer.hidden) return;
+
+  window.clearTimeout(detailCloseTimer);
   document.body.classList.remove("detail-open");
   document.querySelectorAll(".listing-card.is-selected").forEach((card) => card.classList.remove("is-selected"));
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    layer.hidden = true;
+    layer.classList.remove("is-closing");
+    return;
+  }
+
+  layer.classList.add("is-closing");
+  detailCloseTimer = window.setTimeout(() => {
+    layer.hidden = true;
+    layer.classList.remove("is-closing");
+    detailCloseTimer = 0;
+  }, DETAIL_CLOSE_DURATION);
+}
+
+function isListingDetailOpen() {
+  const layer = document.querySelector("#listingDetailLayer");
+  return Boolean(layer && !layer.hidden);
+}
+
+function isEventInsideListingDetail(event) {
+  const dialog = document.querySelector("#listingDetailDialog");
+  const target = event.target;
+  return Boolean(dialog && target && dialog.contains(target));
+}
+
+function closeListingDetailFromOutsideScroll(event) {
+  if (!isListingDetailOpen() || isEventInsideListingDetail(event)) return;
+  closeListingDetail();
 }
 
 function getListingColumnIndex(card, grid, columnCount) {
@@ -538,6 +571,10 @@ function openListingDetail(item, card) {
   const dialog = document.querySelector("#listingDetailDialog");
   if (!item || !layer || !dialog || !card) return;
 
+  window.clearTimeout(detailCloseTimer);
+  detailCloseTimer = 0;
+  layer.classList.remove("is-closing");
+
   const imageSrc = listingImageUrl(item.coverImageUrl) || placeholderImage(item);
   const fallback = placeholderImage(item);
   const tags = (item.tags || []).slice(0, 8).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
@@ -599,6 +636,11 @@ function initListingDetailLayer() {
   if (!grid || !layer) return;
 
   const openFromCard = (card) => {
+    if (isListingDetailOpen() && card.classList.contains("is-selected")) {
+      closeListingDetail();
+      return;
+    }
+
     const index = Number(card.dataset.listingIndex);
     openListingDetail(state.listings[index], card);
   };
@@ -629,6 +671,12 @@ function initListingDetailLayer() {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeListingDetail();
+  });
+
+  document.addEventListener("wheel", closeListingDetailFromOutsideScroll, { passive: true });
+  document.addEventListener("touchmove", closeListingDetailFromOutsideScroll, { passive: true });
+  window.addEventListener("scroll", () => {
+    if (isListingDetailOpen()) closeListingDetail();
   });
 
   window.addEventListener("resize", () => {

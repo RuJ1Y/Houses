@@ -442,16 +442,16 @@ def segment_listing(item: dict) -> str:
     unit_price = item["unitPriceYuanM2"] or 0
     total_price = item["totalPriceWan"] or 0
     area = item["areaM2"] or 0
-    if total_price >= 500 or area >= 200:
+    if total_price >= 500 or area >= 220:
         return "高端大宅型"
-    if unit_price >= 20000:
+    if unit_price >= 20000 and total_price >= 180:
         return "核心高价型"
-    if area >= 110 and 100 <= total_price < 500:
-        return "改善居住型"
-    if total_price < 100 or area < 90:
-        return "刚需紧凑型"
-    if unit_price < 8000:
+    if unit_price < 6500 and area >= 90:
         return "低单价潜力型"
+    if total_price < 90 or area < 75:
+        return "刚需紧凑型"
+    if area >= 140 or total_price >= 250:
+        return "改善居住型"
     return "主流均衡型"
 
 
@@ -487,7 +487,10 @@ def api_market_segments() -> list[dict]:
 
 
 def api_value_districts() -> list[dict]:
-    rows = [row for row in group_by_district() if row["count"] >= 50 and row["avgUnitPrice"]]
+    minimum_sample = 300
+    price_weight = 55
+    supply_weight = 45
+    rows = [row for row in group_by_district() if row["count"] >= minimum_sample and row["avgUnitPrice"]]
     if not rows:
         return []
 
@@ -500,7 +503,7 @@ def api_value_districts() -> list[dict]:
     for row in rows:
         price_score = (max_price - row["avgUnitPrice"]) / price_range
         supply_score = row["count"] / max_count
-        value_score = price_score * 70 + supply_score * 30
+        value_score = price_score * price_weight + supply_score * supply_weight
         if row["avgUnitPrice"] <= 8000:
             level = "低单价机会区"
         elif value_score >= 55:
