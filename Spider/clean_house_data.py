@@ -187,14 +187,15 @@ def clean_rows(
                 dropped["rows_with_empty_fields"] += 1
                 continue
 
-        is_duplicate = dedup_key in seen_keys
+        listing_key = make_listing_key(row)
+        is_duplicate = listing_key in seen_keys
         row["is_duplicate"] = "1" if is_duplicate else "0"
         if is_duplicate:
             duplicate_count += 1
             if drop_duplicates:
                 dropped["duplicate"] += 1
                 continue
-        seen_keys.add(dedup_key)
+        seen_keys.add(listing_key)
 
         district_counter[row["district"]] += 1
         cleaned.append(row)
@@ -211,6 +212,7 @@ def clean_rows(
         "dropped_rows": sum(dropped.values()),
         "drop_reasons": dict(dropped),
         "duplicates_marked": duplicate_count,
+        "duplicate_strategy": "district + normalized_community + area_m2 + room_count + hall_count + total_price_wan",
         "source_counts_before_drop": dict(source_counter),
         "district_counts": dict(district_counter),
         "missing_values_after_clean": missing_after,
@@ -347,6 +349,28 @@ def to_decimal(value: str):
 def make_dedup_key(*parts: str) -> str:
     raw = "|".join(normalize_text(part) for part in parts)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def make_listing_key(row: Dict[str, str]) -> str:
+    parts = [
+        row.get("district", ""),
+        normalize_community_key(row.get("community", "")),
+        normalize_decimal(row.get("area_m2", ""), places=2),
+        normalize_int(row.get("room_count", "")),
+        normalize_int(row.get("hall_count", "")),
+        normalize_decimal(row.get("total_price_wan", ""), places=2),
+    ]
+    return make_dedup_key(*parts)
+
+
+def normalize_community_key(value: str) -> str:
+    value = normalize_text(value)
+    value = re.sub(r"\s+", "", value)
+    value = value.replace("（", "(").replace("）", ")")
+    value = re.sub(r"\(.*?\)", "", value)
+    value = re.sub(r"[A-Za-z]区$", "", value)
+    value = re.sub(r"[一二三四五六七八九十0-9]+期$", "", value)
+    return value
 
 
 if __name__ == "__main__":

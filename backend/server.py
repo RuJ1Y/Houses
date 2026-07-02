@@ -4,6 +4,7 @@ import csv
 import json
 import math
 import mimetypes
+import os
 import statistics
 from collections import Counter, defaultdict
 from http import HTTPStatus
@@ -16,7 +17,7 @@ from urllib.request import Request, urlopen
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
-DATA_FILE = PROJECT_DIR / "Spider" / "data" / "raw" / "chongqing_mobile_fang_listings.csv"
+DATA_FILE = PROJECT_DIR / "Spider" / "data" / "clean" / "chongqing_fang_daojiale_cleaned_dedup.csv"
 STATIC_DIR = BASE_DIR / "static"
 ALLOWED_IMAGE_HOSTS = ("soufunimg.com", "fangimg.com")
 
@@ -204,6 +205,45 @@ def api_room_layout() -> list[dict]:
         if room_count is not None:
             counter[room_count] += 1
     return [{"roomCount": key, "count": counter[key]} for key in sorted(counter)]
+
+
+def room_bucket(room_count: int | None) -> str | None:
+    if room_count is None or room_count <= 0:
+        return None
+    if room_count >= 5:
+        return "5室及以上"
+    return f"{room_count}室"
+
+
+def api_district_room_heatmap() -> dict:
+    district_counts = Counter(item["district"] for item in VALID_LISTINGS if item["district"])
+    districts = [
+        district
+        for district, count in district_counts.most_common()
+        if count >= 50
+    ][:12]
+    room_labels = ["1室", "2室", "3室", "4室", "5室及以上"]
+
+    groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for item in VALID_LISTINGS:
+        label = room_bucket(item["roomCount"])
+        if item["district"] in districts and label in room_labels:
+            groups[(item["district"], label)].append(item)
+
+    cells = []
+    for district in districts:
+        for label in room_labels:
+            items = groups.get((district, label), [])
+            cells.append(
+                {
+                    "district": district,
+                    "roomLabel": label,
+                    "count": len(items),
+                    "avgUnitPrice": round_or_none(avg([i["unitPriceYuanM2"] for i in items])),
+                    "avgTotalPrice": round_or_none(avg([i["totalPriceWan"] for i in items])),
+                }
+            )
+    return {"districts": districts, "roomLabels": room_labels, "cells": cells}
 
 
 def api_orientation_distribution() -> list[dict]:
@@ -670,6 +710,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.send_json(api_area_distribution())
             elif route == "/api/stats/room-layout":
                 self.send_json(api_room_layout())
+            elif route == "/api/stats/district-room-heatmap":
+                self.send_json(api_district_room_heatmap())
             elif route == "/api/stats/orientations":
                 self.send_json(api_orientation_distribution())
             elif route == "/api/stats/tags":
@@ -709,7 +751,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 def run() -> None:
     host = "127.0.0.1"
-    port = 8000
+    port = to_int(os.environ.get("PORT")) or 8000
     if not DATA_FILE.exists():
         print(f"Data file not found: {DATA_FILE}")
     print(f"Loaded {len(LISTINGS)} rows from {DATA_FILE}")

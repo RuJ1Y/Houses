@@ -210,6 +210,82 @@ main {
   background: var(--panel-soft);
 }
 
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: 86px repeat(5, minmax(76px, 1fr));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.heatmap-head,
+.heatmap-label,
+.heatmap-cell {
+  min-height: 48px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.heatmap-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef4f8;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.heatmap-corner {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+.heatmap-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.heatmap-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 76px;
+  padding: 7px 6px;
+  color: #102a25;
+  font-size: 12px;
+  text-align: center;
+}
+
+.heatmap-cell strong {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.heatmap-cell span {
+  color: rgba(16, 42, 37, 0.72);
+}
+
+.empty-state {
+  padding: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .conclusion-list {
   display: grid;
   gap: 10px;

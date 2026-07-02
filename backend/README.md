@@ -5,7 +5,7 @@
 ## 数据文件
 
 ```text
-Spider/data/raw/chongqing_mobile_fang_listings.csv
+Spider/data/clean/chongqing_fang_daojiale_cleaned_dedup.csv
 ```
 
 当前数据规模：

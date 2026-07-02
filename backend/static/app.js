@@ -122,9 +122,16 @@ function renderScatter(rows) {
   ctx.fillStyle = "#f8fafc";
   ctx.fillRect(0, 0, width, height);
 
-  const clean = rows.filter((row) => row.areaM2 && row.unitPriceYuanM2);
+  const clean = rows.filter((row) => row.areaM2 && row.totalPriceWan);
+  if (!clean.length) {
+    ctx.fillStyle = "#667085";
+    ctx.font = "14px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("暂无散点数据", width / 2, height / 2);
+    return;
+  }
   const maxArea = Math.min(Math.max(...clean.map((row) => row.areaM2), 1), 650);
-  const maxUnit = Math.min(Math.max(...clean.map((row) => row.unitPriceYuanM2), 1), 50000);
+  const maxTotalPrice = Math.min(Math.max(...clean.map((row) => row.totalPriceWan), 1), 1200);
   const palette = ["#0f7b6c", "#d36b38", "#365b9f", "#8a5a12", "#7a4db3", "#1677a3", "#b44761", "#4f7d34"];
   const districts = [...new Set(clean.map((row) => row.district))];
 
@@ -143,13 +150,13 @@ function renderScatter(rows) {
   ctx.save();
   ctx.translate(14, padding.top + plotH / 2);
   ctx.rotate(-Math.PI / 2);
-  ctx.fillText("单价 元/㎡", 0, 0);
+  ctx.fillText("总价 万元", 0, 0);
   ctx.restore();
 
   ctx.globalAlpha = 0.72;
   clean.forEach((row) => {
     const x = padding.left + (Math.min(row.areaM2, maxArea) / maxArea) * plotW;
-    const y = padding.top + plotH - (Math.min(row.unitPriceYuanM2, maxUnit) / maxUnit) * plotH;
+    const y = padding.top + plotH - (Math.min(row.totalPriceWan, maxTotalPrice) / maxTotalPrice) * plotH;
     const color = palette[districts.indexOf(row.district) % palette.length];
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -157,6 +164,51 @@ function renderScatter(rows) {
     ctx.fill();
   });
   ctx.globalAlpha = 1;
+}
+
+function renderDistrictRoomHeatmap(data) {
+  const container = document.querySelector("#districtRoomHeatmap");
+  const districts = data?.districts || [];
+  const roomLabels = data?.roomLabels || [];
+  const cells = data?.cells || [];
+  if (!districts.length || !roomLabels.length) {
+    container.innerHTML = `<div class="empty-state">暂无热力图数据</div>`;
+    return;
+  }
+
+  const cellMap = new Map(cells.map((cell) => [`${cell.district}__${cell.roomLabel}`, cell]));
+  const maxPrice = Math.max(...cells.map((cell) => Number(cell.avgUnitPrice) || 0), 1);
+  const minPrice = Math.min(...cells.filter((cell) => cell.avgUnitPrice).map((cell) => Number(cell.avgUnitPrice)), maxPrice);
+  const priceRange = Math.max(maxPrice - minPrice, 1);
+
+  const colorFor = (value) => {
+    if (!value) return "rgba(237, 241, 247, 0.88)";
+    const ratio = Math.max(0.08, Math.min(1, (Number(value) - minPrice) / priceRange));
+    return `rgba(15, 123, 108, ${0.18 + ratio * 0.72})`;
+  };
+
+  container.style.setProperty("--heatmap-cols", roomLabels.length + 1);
+  container.innerHTML = `
+    <div class="heatmap-head heatmap-corner">区县</div>
+    ${roomLabels.map((label) => `<div class="heatmap-head">${escapeHtml(label)}</div>`).join("")}
+    ${districts
+      .map((district) => {
+        const rowCells = roomLabels
+          .map((label) => {
+            const cell = cellMap.get(`${district}__${label}`) || {};
+            const price = cell.avgUnitPrice;
+            return `
+              <div class="heatmap-cell" style="background:${colorFor(price)}" title="${escapeHtml(district)} ${escapeHtml(label)}：${formatNumber(price)}元/㎡，${formatNumber(cell.count || 0)}套">
+                <strong>${formatNumber(price)}</strong>
+                <span>${formatNumber(cell.count || 0)}套</span>
+              </div>
+            `;
+          })
+          .join("");
+        return `<div class="heatmap-label">${escapeHtml(district)}</div>${rowCells}`;
+      })
+      .join("")}
+  `;
 }
 
 function renderConclusions(items) {
@@ -342,6 +394,7 @@ async function initDashboard() {
     priceDistribution,
     areaDistribution,
     roomLayout,
+    districtRoomHeatmap,
     scatter,
     conclusions,
     valueDistricts,
@@ -358,6 +411,7 @@ async function initDashboard() {
       getJson("/api/stats/price-distribution"),
       getJson("/api/stats/area-distribution"),
       getJson("/api/stats/room-layout"),
+      getJson("/api/stats/district-room-heatmap"),
       getJson("/api/stats/scatter?limit=1400"),
       getJson("/api/analysis/conclusions"),
       getJson("/api/analysis/value-districts"),
@@ -395,6 +449,7 @@ async function initDashboard() {
     { valueKey: "count", color: "linear-gradient(90deg, #8a5a12, #d8a54f)" },
   );
   renderScatter(scatter);
+  renderDistrictRoomHeatmap(districtRoomHeatmap);
   renderConclusions(conclusions);
   renderValueDistricts(valueDistricts);
   renderMarketSegments(marketSegments);

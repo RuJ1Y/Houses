@@ -24,7 +24,7 @@
       <section class="dashboard-grid">
         <article class="panel panel-wide">
           <div class="panel-title">
-            <h2>区县均价排行</h2>
+            <h2>区域均价对比</h2>
             <span>元/㎡</span>
           </div>
           <div id="districtPriceChart" class="chart chart-tall"></div>
@@ -32,7 +32,7 @@
 
         <article class="panel">
           <div class="panel-title">
-            <h2>总价区间分布</h2>
+            <h2>价格分布直方图</h2>
             <span>套</span>
           </div>
           <div id="priceDistributionChart" class="chart"></div>
@@ -48,8 +48,8 @@
 
         <article class="panel panel-wide">
           <div class="panel-title">
-            <h2>面积与单价关系</h2>
-            <span>抽样点</span>
+            <h2>面积-价格散点图</h2>
+            <span>面积 × 总价</span>
           </div>
           <canvas id="scatterChart" class="scatter-canvas" width="1040" height="430"></canvas>
         </article>
@@ -60,6 +60,14 @@
             <span>室</span>
           </div>
           <div id="roomChart" class="chart"></div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-title">
+            <h2>区域×户型热力图</h2>
+            <span>平均单价</span>
+          </div>
+          <div id="districtRoomHeatmap" class="heatmap-grid"></div>
         </article>
 
         <article class="panel">
