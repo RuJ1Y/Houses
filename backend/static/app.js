@@ -6,6 +6,7 @@ const state = {
   marketMedianUnitPrice: null,
   scatterRows: [],
   boxplotRows: [],
+  options: null,
 };
 
 const DETAIL_CLOSE_DURATION = 160;
@@ -192,35 +193,133 @@ function renderConclusions(items) {
     .join("");
 }
 
-function renderValueDistricts(rows) {
-  const topRows = rows.slice(0, 8);
-  const maxScore = Math.max(...topRows.map((row) => row.valueScore || 0), 1);
-  document.querySelector("#valueDistricts").innerHTML = `
-    <div class="value-explain">
-      <strong>性价比指数</strong>
-      <span>综合区县平均单价与样本供给量，分数越高表示价格更友好且可选房源更充足。</span>
+function renderPredictionResult(data) {
+  const interval = data.interval || {};
+  const references = (data.references || []).slice(0, 3);
+  const result = document.querySelector("#predictionResult");
+  result.innerHTML = `
+    <div class="prediction-hero">
+      <div>
+        <span>预测总价</span>
+        <strong>${formatNumber(data.predictedTotalPrice, 1)}万</strong>
+      </div>
+      <div>
+        <span>${formatNumber(data.futureMonths)}个月后单价</span>
+        <strong>${formatNumber(data.predictedUnitPrice)}元/㎡</strong>
+      </div>
     </div>
-    <div class="value-list">
-      ${topRows
-        .map((row) => {
-          const width = Math.max(4, (row.valueScore / maxScore) * 100);
-          return `
-            <div class="value-row">
-              <div class="value-main">
-                <strong>${escapeHtml(row.district)}</strong>
-                <span>${escapeHtml(row.level)} · ${formatNumber(row.count)}套</span>
-              </div>
-              <div class="value-track">
-                <div class="value-fill" style="width:${width}%"></div>
-              </div>
-              <div class="value-score">${formatNumber(row.valueScore, 1)}</div>
-              <div class="value-meta">${formatNumber(row.avgUnitPrice)}元/㎡ · ${formatNumber(row.avgTotalPrice, 1)}万</div>
+    <div class="prediction-metrics">
+      <div>
+        <span>当前估价</span>
+        <strong>${formatNumber(data.currentTotalPrice, 1)}万</strong>
+      </div>
+      <div>
+        <span>价格区间</span>
+        <strong>${formatNumber(interval.lowTotalPrice, 1)}-${formatNumber(interval.highTotalPrice, 1)}万</strong>
+      </div>
+      <div>
+        <span>年化趋势</span>
+        <strong>${formatNumber(data.annualGrowthRate, 1)}%</strong>
+      </div>
+      <div>
+        <span>置信度</span>
+        <strong>${formatNumber(data.confidence, 1)}%</strong>
+      </div>
+    </div>
+    <div class="prediction-drivers">
+      ${(data.drivers || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+    </div>
+    <div class="prediction-references">
+      ${references
+        .map(
+          (item) => `
+            <div class="reference-row">
+              <strong>${escapeHtml(item.community || item.district)}</strong>
+              <span>${formatNumber(item.areaM2, 1)}㎡ · ${formatNumber(item.totalPriceWan, 0)}万 · ${formatNumber(item.similarity, 1)}%</span>
             </div>
-          `;
-        })
+          `,
+        )
         .join("")}
     </div>
   `;
+}
+
+async function runPricePrediction() {
+  const form = document.querySelector("#predictionForm");
+  const result = document.querySelector("#predictionResult");
+  const params = new URLSearchParams(new FormData(form));
+  result.innerHTML = `<div class="prediction-empty">模型计算中...</div>`;
+  try {
+    const data = await getJson(`/api/analysis/price-prediction?${params.toString()}`);
+    renderPredictionResult(data);
+  } catch (error) {
+    result.innerHTML = `<div class="prediction-empty">预测失败：${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderPricePredictor(options = {}) {
+  const districts = options.districts || [];
+  const orientations = options.orientations || [];
+  const defaultDistrict = districts.includes("九龙坡") ? "九龙坡" : districts[0] || "";
+  document.querySelector("#pricePredictor").innerHTML = `
+    <form id="predictionForm" class="predictor-form">
+      <label>
+        <span>区县</span>
+        <select name="district">
+          ${districts
+            .map(
+              (district) =>
+                `<option value="${escapeHtml(district)}" ${district === defaultDistrict ? "selected" : ""}>${escapeHtml(district)}</option>`,
+            )
+            .join("")}
+        </select>
+      </label>
+      <label>
+        <span>小区 / 位置</span>
+        <input name="location" type="text" value="华润二十四城" />
+      </label>
+      <label>
+        <span>面积</span>
+        <input name="area" type="number" min="30" max="600" step="1" value="120" />
+      </label>
+      <label>
+        <span>室数</span>
+        <input name="room" type="number" min="1" max="9" step="1" value="3" />
+      </label>
+      <label>
+        <span>厅数</span>
+        <input name="hall" type="number" min="0" max="5" step="1" value="2" />
+      </label>
+      <label>
+        <span>朝向</span>
+        <select name="orientation">
+          <option value="">不限</option>
+          ${orientations
+            .slice(0, 16)
+            .map((orientation) => `<option value="${escapeHtml(orientation)}">${escapeHtml(orientation)}</option>`)
+            .join("")}
+        </select>
+      </label>
+      <label>
+        <span>预测周期</span>
+        <select name="months">
+          <option value="6">6个月</option>
+          <option value="12" selected>12个月</option>
+          <option value="24">24个月</option>
+          <option value="36">36个月</option>
+          <option value="60">60个月</option>
+        </select>
+      </label>
+      <button type="submit">开始预测</button>
+    </form>
+    <div id="predictionResult" class="prediction-result"></div>
+  `;
+
+  document.querySelector("#predictionForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    runPricePrediction();
+  });
+  runPricePrediction();
 }
 
 function renderMarketSegments(rows) {
@@ -752,6 +851,7 @@ async function loadListings() {
 
 async function initFilters() {
   const options = await getJson("/api/options");
+  state.options = options;
   const select = document.querySelector("#districtFilter");
   select.innerHTML = `<option value="">全部区县</option>${options.districts
     .map((district) => `<option value="${escapeHtml(district)}">${escapeHtml(district)}</option>`)
@@ -780,7 +880,6 @@ async function initDashboard() {
     roomLayout,
     scatter,
     conclusions,
-    valueDistricts,
     marketSegments,
     districtQuadrants,
     topCommunities,
@@ -798,7 +897,6 @@ async function initDashboard() {
       getJson("/api/stats/room-layout"),
       getJson("/api/stats/scatter?limit=1400"),
       getJson("/api/analysis/conclusions"),
-      getJson("/api/analysis/value-districts"),
       getJson("/api/analysis/market-segments"),
       getJson("/api/analysis/district-quadrants"),
       getJson("/api/analysis/top-communities"),
@@ -838,7 +936,7 @@ async function initDashboard() {
   );
   renderScatter(scatter);
   renderConclusions(conclusions);
-  renderValueDistricts(valueDistricts);
+  renderPricePredictor(state.options || {});
   renderMarketSegments(marketSegments);
   renderInsightTable(
     "#districtQuadrants",

@@ -125,6 +125,10 @@ def round_or_none(value: float | None, digits: int = 1) -> float | None:
     return None if value is None else round(value, digits)
 
 
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(value, high))
+
+
 def group_by_district() -> list[dict]:
     groups: dict[str, list[dict]] = defaultdict(list)
     for item in VALID_LISTINGS:
@@ -522,6 +526,206 @@ def api_value_districts() -> list[dict]:
     return sorted(result, key=lambda row: row["valueScore"], reverse=True)
 
 
+def text_similarity(keyword: str, *values: str) -> float:
+    keyword = keyword.strip().lower()
+    if not keyword:
+        return 0
+    haystack = " ".join(value for value in values if value).lower()
+    if not haystack:
+        return 0
+    if keyword == haystack:
+        return 1
+    if keyword in haystack:
+        return 0.86
+    keyword_chars = set(keyword)
+    if not keyword_chars:
+        return 0
+    overlap = len(keyword_chars & set(haystack)) / len(keyword_chars)
+    return clamp(overlap * 0.72, 0, 0.72)
+
+
+def weighted_average(values: list[tuple[float, float]]) -> float | None:
+    clean = [(value, weight) for value, weight in values if value is not None and weight > 0]
+    if not clean:
+        return None
+    total_weight = sum(weight for _, weight in clean)
+    if total_weight <= 0:
+        return None
+    return sum(value * weight for value, weight in clean) / total_weight
+
+
+def score_prediction_candidate(item: dict, params: dict) -> float:
+    area = params["areaM2"]
+    room_count = params["roomCount"]
+    hall_count = params["hallCount"]
+    district = params["district"]
+    orientation = params["orientation"]
+    location = params["location"]
+
+    item_area = item["areaM2"] or area
+    area_delta = abs(item_area - area) / max(area, item_area, 1)
+    area_score = clamp(1 - area_delta * 1.8, 0, 1)
+
+    room_score = 0.55
+    if room_count and item["roomCount"]:
+        room_score = clamp(1 - abs(item["roomCount"] - room_count) / 4, 0, 1)
+
+    hall_score = 0.55
+    if hall_count is not None and item["hallCount"] is not None:
+        hall_score = 1 if item["hallCount"] == hall_count else 0.55
+
+    district_score = 0.5
+    if district:
+        district_score = 1 if item["district"] == district else 0.16
+
+    orientation_score = 0.5
+    if orientation:
+        orientation_score = 1 if orientation in item["orientation"] else 0.42
+
+    location_score = text_similarity(location, item["community"], item["title"])
+    return (
+        0.30 * area_score
+        + 0.24 * district_score
+        + 0.14 * room_score
+        + 0.06 * hall_score
+        + 0.08 * orientation_score
+        + 0.16 * location_score
+        + 0.02
+    )
+
+
+def api_price_prediction(query: dict[str, list[str]]) -> dict:
+    area = to_float(query.get("area", [""])[0]) or 100
+    area = clamp(area, 30, 600)
+    room_count = to_int(query.get("room", [""])[0]) or max(1, round(area / 42))
+    hall_count = to_int(query.get("hall", [""])[0])
+    if hall_count is None:
+        hall_count = 2 if area >= 85 else 1
+    future_months = max(6, min(to_int(query.get("months", ["12"])[0]) or 12, 60))
+
+    params = {
+        "district": (query.get("district", [""])[0] or "").strip(),
+        "location": (query.get("location", [""])[0] or "").strip(),
+        "areaM2": area,
+        "roomCount": max(1, min(room_count, 9)),
+        "hallCount": max(0, min(hall_count, 5)),
+        "orientation": (query.get("orientation", [""])[0] or "").strip(),
+    }
+
+    candidates = [
+        item
+        for item in VALID_LISTINGS
+        if item["areaM2"] is not None and item["unitPriceYuanM2"] is not None and item["totalPriceWan"] is not None
+    ]
+    scored = []
+    for item in candidates:
+        score = score_prediction_candidate(item, params)
+        if params["district"] and item["district"] != params["district"]:
+            score *= 0.55
+        if params["location"] and text_similarity(params["location"], item["community"], item["title"]) <= 0.1:
+            score *= 0.82
+        if score >= 0.14:
+            scored.append((score, item))
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    top_matches = scored[:180]
+    if len(top_matches) < 30:
+        top_matches = sorted(
+            ((score_prediction_candidate(item, params), item) for item in candidates),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )[:180]
+
+    unit_pairs = [(item["unitPriceYuanM2"], max(score, 0.04) ** 2.1) for score, item in top_matches]
+    comparable_unit_price = weighted_average(unit_pairs) or median([item["unitPriceYuanM2"] for _, item in top_matches]) or 0
+
+    district_rows = group_by_district()
+    district_lookup = {row["district"]: row for row in district_rows}
+    district_row = district_lookup.get(params["district"])
+    city_median_unit = median([item["unitPriceYuanM2"] for item in VALID_LISTINGS]) or comparable_unit_price
+    district_median_unit = district_row["medianUnitPrice"] if district_row else None
+
+    if district_median_unit:
+        current_unit_price = comparable_unit_price * 0.72 + district_median_unit * 0.2 + city_median_unit * 0.08
+    else:
+        current_unit_price = comparable_unit_price * 0.88 + city_median_unit * 0.12
+
+    current_total_price = current_unit_price * area / 10000
+
+    max_district_count = max((row["count"] for row in district_rows), default=1)
+    district_count = district_row["count"] if district_row else 0
+    district_unit = district_median_unit or city_median_unit
+    price_index = (district_unit - city_median_unit) / max(city_median_unit, 1)
+    supply_index = math.log1p(district_count) / max(math.log1p(max_district_count), 1)
+    area_bonus = 0.006 if area >= 140 else (-0.004 if area <= 70 else 0)
+    room_bonus = 0.003 if params["roomCount"] >= 4 else 0
+    liquidity_bonus = (supply_index - 0.5) * 0.018
+    price_bonus = clamp(price_index * 0.018, -0.014, 0.018)
+    annual_growth_rate = clamp(0.012 + liquidity_bonus + price_bonus + area_bonus + room_bonus, -0.012, 0.055)
+    growth_multiplier = (1 + annual_growth_rate) ** (future_months / 12)
+
+    predicted_unit_price = current_unit_price * growth_multiplier
+    predicted_total_price = predicted_unit_price * area / 10000
+
+    top_unit_prices = [item["unitPriceYuanM2"] for _, item in top_matches[:120]]
+    low_unit = min(
+        (percentile(top_unit_prices, 0.2) or current_unit_price * 0.88) * growth_multiplier,
+        predicted_unit_price * 0.92,
+    )
+    high_unit = max(
+        (percentile(top_unit_prices, 0.8) or current_unit_price * 1.12) * growth_multiplier,
+        predicted_unit_price * 1.08,
+    )
+    if low_unit > high_unit:
+        low_unit, high_unit = high_unit, low_unit
+
+    avg_similarity = avg([score for score, _ in top_matches[:40]]) or 0
+    sample_score = clamp(len(top_matches) / 160 * 18, 4, 18)
+    district_score = clamp(supply_index * 20, 4, 20)
+    similarity_score = clamp(avg_similarity * 40, 8, 40)
+    confidence = clamp(32 + sample_score + district_score + similarity_score, 45, 92)
+
+    references = []
+    for score, item in top_matches[:5]:
+        references.append(
+            {
+                "title": item["title"],
+                "district": item["district"],
+                "community": item["community"],
+                "areaM2": round_or_none(item["areaM2"]),
+                "unitPriceYuanM2": item["unitPriceYuanM2"],
+                "totalPriceWan": item["totalPriceWan"],
+                "similarity": round(score * 100, 1),
+            }
+        )
+
+    drivers = [
+        f"参考相似房源{len(top_matches)}套，其中同区县样本{district_count or '不足'}套",
+        f"相似样本加权单价约{round(comparable_unit_price)}元/㎡，城市中位单价约{round(city_median_unit)}元/㎡",
+        f"预测周期{future_months}个月，模型年化趋势约{round(annual_growth_rate * 100, 1)}%",
+    ]
+
+    return {
+        "input": params,
+        "futureMonths": future_months,
+        "currentUnitPrice": round_or_none(current_unit_price),
+        "currentTotalPrice": round_or_none(current_total_price, 1),
+        "predictedUnitPrice": round_or_none(predicted_unit_price),
+        "predictedTotalPrice": round_or_none(predicted_total_price, 1),
+        "annualGrowthRate": round_or_none(annual_growth_rate * 100, 1),
+        "confidence": round_or_none(confidence, 1),
+        "sampleCount": len(top_matches),
+        "interval": {
+            "lowUnitPrice": round_or_none(low_unit),
+            "highUnitPrice": round_or_none(high_unit),
+            "lowTotalPrice": round_or_none(low_unit * area / 10000, 1),
+            "highTotalPrice": round_or_none(high_unit * area / 10000, 1),
+        },
+        "drivers": drivers,
+        "references": references,
+    }
+
+
 def api_district_quadrants() -> list[dict]:
     rows = [row for row in group_by_district() if row["count"] >= 50]
     if not rows:
@@ -623,8 +827,10 @@ def api_options() -> dict:
     units = [item["unitPriceYuanM2"] for item in VALID_LISTINGS]
     totals = [item["totalPriceWan"] for item in VALID_LISTINGS]
     areas = [item["areaM2"] for item in VALID_LISTINGS]
+    orientations = sorted({item["orientation"] for item in VALID_LISTINGS if item["orientation"]})
     return {
         "districts": sorted({item["district"] for item in LISTINGS}),
+        "orientations": orientations,
         "unitPriceRange": [min(units), max(units)] if units else [None, None],
         "totalPriceRange": [min(totals), max(totals)] if totals else [None, None],
         "areaRange": [min(areas), max(areas)] if areas else [None, None],
@@ -775,6 +981,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.send_json(api_market_segments())
             elif route == "/api/analysis/value-districts":
                 self.send_json(api_value_districts())
+            elif route == "/api/analysis/price-prediction":
+                self.send_json(api_price_prediction(query))
             elif route == "/api/analysis/district-quadrants":
                 self.send_json(api_district_quadrants())
             elif route == "/api/houses":
